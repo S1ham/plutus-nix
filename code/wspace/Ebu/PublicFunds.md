@@ -1,6 +1,6 @@
-# 🧾 Detailed Tutorial: Understanding and Using `PublicFunds.hs`
+# 🧾 Comprehensive Tutorial: Public Funds Escrow Smart Contract
 
-This tutorial covers the `PublicFunds.hs` module, a sophisticated escrow smart contract for multi-signature governance. This contract enables secure fund management with approval-based release mechanisms and timeout-based refunds.
+This comprehensive tutorial covers both the on-chain validator (`PublicFunds.hs`) and off-chain code (`Main.hs`) for a multi-signature escrow smart contract. This system enables secure fund management requiring multiple approvals before release.
 
 ---
 
@@ -8,89 +8,84 @@ This tutorial covers the `PublicFunds.hs` module, a sophisticated escrow smart c
 
 1. [📦 Imports Overview](#1-imports-overview)
 2. [🗃️ Data Structures](#2-data-structures)
-3. [🔧 Helper Functions](#3-helper-functions)
+3. [🔧 On-Chain Helper Functions](#3-on-chain-helper-functions)
 4. [🧠 Core Validator Logic](#4-core-validator-logic)
 5. [⚙️ Validator Script Compilation](#5-validator-script-compilation)
-6. [🔧 Deployment Utilities](#6-deployment-utilities)
-7. [🧪 Practical Usage Example](#7-practical-usage-example)
-8. [🧷 Testing Strategy](#8-testing-strategy)
-9. [✅ Best Practices](#9-best-practices)
-10. [📘 Glossary of Terms](#10-glossary-of-terms)
+6. [🔌 Off-Chain Components](#6-off-chain-components)
+7. [🔄 Contract Endpoints](#7-contract-endpoints)
+8. [🎮 Emulator Trace](#8-emulator-trace)
+9. [🚀 Deployment Workflow](#9-deployment-workflow)
+10. [🧪 Testing Strategy](#10-testing-strategy)
+11. [✅ Best Practices](#11-best-practices)
+12. [📘 Glossary of Terms](#12-glossary-of-terms)
 
 ---
 
 ## 1. 📦 Imports Overview
 
-### Plutus API Modules
+### On-Chain Imports (`PublicFunds.hs`)
 
-* **Plutus.V2.Ledger.Api:**
-  Provides fundamental types such as `POSIXTime`, `PubKeyHash`, `ScriptContext`, and validator construction functions.
+| Module | Purpose |
+|--------|---------|
+| `Plutus.V2.Ledger.Api` | Core Plutus types: `Validator`, `ScriptContext`, `PubKeyHash` |
+| `Plutus.V2.Ledger.Contexts` | Transaction context utilities: `txSignedBy`, `scriptContextTxInfo` |
+| `Plutus.V1.Ledger.Interval` | Time interval operations: `contains`, `to`, `from` |
+| `PlutusTx` | Template Haskell compilation: `compile`, `unstableMakeIsData` |
+| `PlutusTx.Prelude` | Inlinable Plutus functions |
+| `Codec.Serialise` | Script serialization to file |
+| `Data.ByteString` | Byte string manipulation |
+| `Cardano.Api` | Cardano node integration |
 
-* **Plutus.V2.Ledger.Contexts:**
-  Contains utility functions for transaction context validation (`txSignedBy`, `scriptContextTxInfo`).
+### Off-Chain Imports (`Main.hs`)
 
-* **Plutus.V1.Ledger.Interval:**
-  Supplies interval functions (`contains`, `to`, `from`) for time-based validations.
-
-### Compilation & Serialization
-
-* **PlutusTx:**
-  Enables script compilation (`compile`, `unstableMakeIsData`) and data conversion (`unsafeFromBuiltinData`).
-
-* **PlutusTx.Prelude:**
-  Basic Plutus scripting functions including `traceError` and `traceIfFalse`.
-
-### Cardano API & Utilities
-
-* **Cardano.Api / Cardano.Api.Shelley:**
-  Provides serialization utilities for converting Plutus scripts to Cardano's format.
-
-* **Codec.Serialise & Data.ByteString:**
-  Used for serializing validator scripts to file.
-
-* **Data.Text & Prelude:**
-  Standard Haskell libraries for text manipulation and basic operations.
+| Module | Purpose |
+|--------|---------|
+| `Control.Monad` | Monadic operations |
+| `Ledger` | Wallet and address utilities |
+| `Ledger.Ada` | ADA handling and value construction |
+| `Plutus.Contract` | Contract monad and endpoints |
+| `Plutus.Trace.Emulator` | Emulator trace execution |
+| `Wallet.Emulator.Wallet` | Mock wallet management |
+| `OnChain.PublicFunds` | Import of the on-chain validator |
 
 ---
 
 ## 2. 🗃️ Data Structures
 
-### `EscrowDatum`
+### On-Chain Data Types
 
-Defines the contract's state with the following fields:
+#### `EscrowDatum`
+The contract state stored on-chain:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `edDepositor` | `PubKeyHash` | The public key hash of the fund depositor |
-| `edBeneficiary` | `PubKeyHash` | The public key hash of the intended recipient |
-| `edOfficials` | `[PubKeyHash]` | List of m officials authorized to approve |
-| `edApprovals` | `[PubKeyHash]` | Collection of approvals received so far |
-| `edRequired` | `Integer` | Number of approvals (n) required for release |
-| `edDeadline` | `POSIXTime` | Deadline for approvals and release |
+| `edDepositor` | `PubKeyHash` | Fund depositor's public key hash |
+| `edBeneficiary` | `PubKeyHash` | Intended recipient's public key hash |
+| `edOfficials` | `[PubKeyHash]` | List of m authorized officials |
+| `edApprovals` | `[PubKeyHash]` | Accumulated approval signatures |
+| `edRequired` | `Integer` | Minimum approvals needed (n ≤ m) |
+| `edDeadline` | `POSIXTime` | Deadline for action execution |
 
-### `EscrowAction`
+#### `EscrowAction`
+The redeemer type for state transitions:
 
-Defines the redeemer actions:
-
-| Action | Purpose |
-|--------|---------|
-| `Approve` | Official adds their approval to the datum |
-| `Release` | Beneficiary claims funds after sufficient approvals |
-| `Refund` | Depositor reclaims funds if deadline passes with insufficient approvals |
+| Action | Purpose | Required Signer |
+|--------|---------|-----------------|
+| `Approve` | Official adds approval | Approving official |
+| `Release` | Beneficiary claims funds | Beneficiary |
+| `Refund` | Depositor reclaims funds | Depositor |
 
 ---
 
-## 3. 🔧 Helper Functions
+## 3. 🔧 On-Chain Helper Functions
 
-### `signedBy`
+### Signature and Time Validation
 
 ```haskell
 {-# INLINABLE signedBy #-}
 signedBy :: PubKeyHash -> ScriptContext -> Bool
 ```
-Checks if a specific public key hash signed the transaction.
-
-### `beforeDeadline` & `afterDeadline`
+Checks if a specific public key signed the transaction.
 
 ```haskell
 {-# INLINABLE beforeDeadline #-}
@@ -99,50 +94,71 @@ beforeDeadline :: POSIXTime -> ScriptContext -> Bool
 {-# INLINABLE afterDeadline #-}
 afterDeadline :: POSIXTime -> ScriptContext -> Bool
 ```
-Validate whether the transaction occurs before or after the specified deadline.
+Validates transaction timing relative to deadline.
 
-### `uniqueApproval`
+### Approval Logic
 
 ```haskell
 {-# INLINABLE uniqueApproval #-}
 uniqueApproval :: PubKeyHash -> EscrowDatum -> Bool
 ```
-Ensures an official hasn't already approved and is in the officials list.
+Ensures an official approves only once and is authorized.
 
 ---
 
 ## 4. 🧠 Core Validator Logic
 
-### `mkValidator`
+### `mkValidator` Function
+The main validation logic with three execution paths:
 
-Main validation logic implementing three distinct workflows:
+#### **Approve Path**
+```haskell
+Approve ->
+    traceIfFalse "deadline passed" (beforeDeadline (edDeadline d) ctx) &&
+    traceIfFalse "invalid approver" (uniqueApproval signer d)
+```
+**Conditions:**
+- Must execute before deadline
+- Exactly one signer required
+- Signer must be an unauthorized official
 
-#### **Approve Action**
-- Must be executed before deadline
-- Requires exactly one signer
-- Signer must be an official who hasn't approved yet
+#### **Release Path**
+```haskell
+Release ->
+    traceIfFalse "deadline passed" (beforeDeadline (edDeadline d) ctx) &&
+    traceIfFalse "not enough approvals" (length (edApprovals d) >= edRequired d) &&
+    traceIfFalse "beneficiary signature missing" (signedBy (edBeneficiary d) ctx)
+```
+**Conditions:**
+- Must execute before deadline
+- Minimum approvals met (n)
+- Beneficiary signature required
 
-#### **Release Action**
-- Must be executed before deadline
-- Requires at least `n` approvals (where `n = edRequired`)
-- Requires beneficiary's signature
-
-#### **Refund Action**
-- Must be executed after deadline
-- Requires fewer than `n` approvals
-- Requires depositor's signature
+#### **Refund Path**
+```haskell
+Refund ->
+    traceIfFalse "deadline not reached" (afterDeadline (edDeadline d) ctx) &&
+    traceIfFalse "approvals already sufficient" (length (edApprovals d) < edRequired d) &&
+    traceIfFalse "depositor signature missing" (signedBy (edDepositor d) ctx)
+```
+**Conditions:**
+- Must execute after deadline
+- Insufficient approvals
+- Depositor signature required
 
 ---
 
 ## 5. ⚙️ Validator Script Compilation
 
-### `mkValidatorUntyped`
+### Type Conversion Wrapper
 
-Wraps the typed validator for compatibility with Plutus on-chain scripts using `BuiltinData`.
+```haskell
+{-# INLINABLE mkValidatorUntyped #-}
+mkValidatorUntyped :: BuiltinData -> BuiltinData -> BuiltinData -> ()
+```
+Wraps the typed validator for Plutus on-chain compatibility.
 
-### `validator`
-
-Compiles the validator into a Plutus Core script ready for blockchain deployment:
+### Script Compilation
 
 ```haskell
 validator :: Validator
@@ -150,94 +166,241 @@ validator =
     mkValidatorScript
         $$(PlutusTx.compile [|| mkValidatorUntyped ||])
 ```
+Compiles the validator to Plutus Core for blockchain deployment.
 
 ---
 
-## 6. 🔧 Deployment Utilities
+## 6. 🔌 Off-Chain Components
 
-*(Note: The provided code snippet doesn't include deployment utilities, but typical deployment would involve:)*
-
-- **Script Serialization:** Convert validator to CBOR format
-- **Address Generation:** Create Bech32 address for the script
-- **Datum Construction:** Helper functions to create `EscrowDatum`
-- **Redeemer Construction:** Helper functions for `EscrowAction`
-
----
-
-## 7. 🧪 Practical Usage Example
+### Contract Schema
 
 ```haskell
--- Example datum creation
-exampleDatum :: EscrowDatum
-exampleDatum = EscrowDatum
-    { edDepositor = "pubkey1..."
-    , edBeneficiary = "pubkey2..."
-    , edOfficials = ["official1...", "official2...", "official3..."]
-    , edApprovals = []
-    , edRequired = 2
-    , edDeadline = 1700000000000
-    }
+type EscrowSchema =
+        Endpoint "lock" ()
+    .\/ Endpoint "approve" ()
+    .\/ Endpoint "release" ()
+    .\/ Endpoint "refund" ()
+```
+Defines the available contract endpoints.
 
--- Typical workflow:
--- 1. Deploy contract with initial datum (empty approvals)
--- 2. Officials submit "Approve" transactions
--- 3. After reaching required approvals, beneficiary can "Release"
--- 4. If deadline passes with insufficient approvals, depositor can "Refund"
+### Script Address
+
+```haskell
+escrowAddress :: Address
+escrowAddress = scriptAddress validator
+```
+Derives the script address from the compiled validator.
+
+### Datum Creation Helper
+
+```haskell
+mkDatum :: Wallet -> Wallet -> [Wallet] -> POSIXTime -> EscrowDatum
+mkDatum depositor beneficiary officials deadline =
+    EscrowDatum
+        { edDepositor   = mockWalletPaymentPubKeyHash depositor
+        , edBeneficiary = mockWalletPaymentPubKeyHash beneficiary
+        , edOfficials   = fmap mockWalletPaymentPubKeyHash officials
+        , edApprovals   = []
+        , edRequired    = 2
+        , edDeadline    = deadline
+        }
+```
+Creates initial datum with empty approvals list.
+
+---
+
+## 7. 🔄 Contract Endpoints
+
+### `lock` Endpoint
+
+```haskell
+lock :: Contract () EscrowSchema Text ()
+lock = do
+    let datum = mkDatum (knownWallet 1) (knownWallet 2)
+                    [knownWallet 3, knownWallet 4] 20_000
+        tx = mustPayToTheScript datum (Ada.lovelaceValueOf 10_000_000)
+    void $ submitTxConstraints validator tx
+```
+**Purpose:** Locks funds in the escrow contract with initial datum.
+
+### `approve` Endpoint
+
+```haskell
+approve :: Contract () EscrowSchema Text ()
+approve = do
+    utxos <- utxosAt escrowAddress
+    case utxos of
+        [(oref, _)] ->
+            void $ submitTxConstraintsSpending validator utxos
+                (mustSpendScriptOutput oref (Redeemer $ toBuiltinData Approve))
+        _ -> logError @String "No script UTxO"
+```
+**Purpose:** Official adds their approval to the escrow.
+
+### `release` Endpoint
+
+```haskell
+release :: Contract () EscrowSchema Text ()
+release = do
+    utxos <- utxosAt escrowAddress
+    case utxos of
+        [(oref, _)] ->
+            void $ submitTxConstraintsSpending validator utxos
+                (mustSpendScriptOutput oref (Redeemer $ toBuiltinData Release))
+        _ -> logError @String "No script UTxO"
+```
+**Purpose:** Beneficiary claims funds after sufficient approvals.
+
+---
+
+## 8. 🎮 Emulator Trace
+
+### Complete Workflow Simulation
+
+```haskell
+trace :: EmulatorTrace ()
+trace = do
+    -- Wallet 1 locks funds
+    h1 <- activateContractWallet (knownWallet 1) lock
+    void $ Emulator.waitNSlots 1
+
+    -- Official 3 approves
+    h3 <- activateContractWallet (knownWallet 3) approve
+    void $ Emulator.waitNSlots 1
+
+    -- Official 4 approves (reaching required 2 approvals)
+    h4 <- activateContractWallet (knownWallet 4) approve
+    void $ Emulator.waitNSlots 1
+
+    -- Beneficiary releases funds
+    h2 <- activateContractWallet (knownWallet 2) release
+    void $ Emulator.waitNSlots 1
+```
+
+### Execution Flow
+```
+Wallet 1 (Depositor)
+    ↓ Locks 10 ADA
+Escrow Contract (0 approvals)
+    ↓ Wallet 3 approves
+Escrow Contract (1 approval)
+    ↓ Wallet 4 approves
+Escrow Contract (2 approvals - SUFFICIENT)
+    ↓ Wallet 2 (Beneficiary) releases
+Wallet 2 receives 10 ADA
 ```
 
 ---
 
-## 8. 🧷 Testing Strategy
+## 9. 🚀 Deployment Workflow
 
-### Critical Test Scenarios
-- **Approval Flow:** Test individual official approvals and duplicate approval prevention
-- **Threshold Validation:** Test release with exactly `n-1`, `n`, and `n+1` approvals
-- **Time Boundaries:** Test transactions immediately before and after deadline
-- **Signature Validation:** Test all actions with correct/incorrect signatures
-- **Edge Cases:** Empty officials list, zero required approvals, etc.
+### Step 1: Compile Validator
+```bash
+cabal build
+```
+
+### Step 2: Run Emulator Test
+```bash
+cabal run public-funds-emulator
+```
+
+### Step 3: Serialize Script (Example)
+```haskell
+-- Save validator to file
+saveVal :: IO ()
+saveVal = writeValidatorToFile "escrow.plutus" validator
+```
+
+### Step 4: Deploy to Testnet
+1. Load validator in Plutus Application Backend (PAB)
+2. Initialize contract with parameters
+3. Fund the contract address
+4. Distribute approval credentials to officials
 
 ---
 
-## 9. ✅ Best Practices
+## 10. 🧪 Testing Strategy
+
+### Unit Tests
+- **Individual Actions:** Test each redeemer in isolation
+- **Time Boundaries:** Transactions at deadline ± 1 slot
+- **Signature Validation:** Correct/incorrect signers for each action
+
+### Integration Tests
+- **Complete Workflow:** Lock → Approve × n → Release
+- **Failed Release:** Attempt release with insufficient approvals
+- **Timeout Refund:** Allow deadline to pass, then refund
+- **Duplicate Approval:** Attempt same official approving twice
+
+### Edge Cases
+- Empty officials list
+- Zero required approvals (immediate release)
+- All officials required (n = m)
+- Single official (n = m = 1)
+- Deadline in past at contract creation
+
+---
+
+## 11. ✅ Best Practices
 
 ### Security Considerations
-- **Signature Validation:** Always verify signers match expected parties
-- **Time Validation:** Use strict before/after checks without tolerance
-- **Approval Tracking:** Prevent duplicate approvals from same official
-- **Threshold Logic:** Ensure `n ≤ m` (required ≤ total officials)
+1. **Parameter Validation:** Ensure n ≤ m during datum creation
+2. **Time Handling:** Use strict inequalities for deadline checks
+3. **Signature Enforcement:** Require exact signers for each action
+4. **Approval Tracking:** Prevent duplicate approvals through list membership checks
 
-### Development Practices
-- Use `traceIfFalse` with descriptive messages for debugging
-- Validate all preconditions before processing
-- Consider gas costs for on-chain list operations
-- Test with various (m, n) combinations
+### Gas Optimization
+1. **List Operations:** Consider gas costs for large m values
+2. **Datum Size:** Keep approval list reasonable (off-chain tracking alternative)
+3. **Script Complexity:** Minimize trace operations in production
+
+### User Experience
+1. **Clear Error Messages:** Use descriptive `traceIfFalse` messages
+2. **Off-Chain Tracking:** Maintain approval state off-chain for UI
+3. **Deadline Notifications:** Alert stakeholders approaching deadlines
+4. **Multi-Signature Tools:** Provide tools for official coordination
 
 ---
 
-## 10. 📘 Glossary of Terms
+## 12. 📘 Glossary of Terms
 
 | Term | Definition |
 |------|------------|
-| **Escrow** | A financial arrangement where funds are held by a third party until conditions are met |
-| **Multi-signature** | Requiring multiple parties to authorize a transaction |
-| **Datum** | On-chain state data that determines contract behavior |
-| **Redeemer** | Action specification that triggers state transitions |
-| **PubKeyHash** | Cryptographic hash of a public key used for authorization |
-| **POSIXTime** | Unix timestamp representation for deadlines |
-| **m-of-n** | Governance model requiring m approvals out of n officials |
-| **Validator** | Smart contract logic that validates transaction legitimacy |
-| **ScriptContext** | Transaction context including signatures, time range, etc. |
-| **BuiltinData** | Raw Plutus data type for on-chain serialization |
+| **Escrow** | Funds held by a third party until conditions are met |
+| **Multi-Signature** | Authorization requiring multiple signatures |
+| **m-of-n** | Governance requiring m approvals from n officials |
+| **Datum** | On-chain state data determining contract behavior |
+| **Redeemer** | Action specification triggering state transitions |
+| **PubKeyHash** | Cryptographic hash of a public key |
+| **POSIXTime** | Unix timestamp for deadline specification |
+| **Validator** | Smart contract logic validating transactions |
+| **ScriptContext** | Transaction context (signatures, time, inputs/outputs) |
+| **Emulator Trace** | Simulation environment for testing smart contracts |
+| **Contract Endpoint** | Off-chain interface for user interaction |
+| **UTxO** | Unspent Transaction Output (blockchain state element) |
+| **Bech32** | Human-readable address encoding used in Cardano |
 
 ---
 
-## 🔄 State Transition Diagram
+## 🔄 System Architecture Diagram
 
 ```
-Initial State
-    ├── [Approve] → (Add approval if before deadline and official)
-    ├── [Release] → (Transfer to beneficiary if approvals ≥ n and before deadline)
-    └── [Refund] → (Return to depositor if after deadline and approvals < n)
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Depositor     │────▶│   Escrow        │────▶│   Beneficiary   │
+│   (Wallet 1)    │Lock │   Contract      │Release│   (Wallet 2)   │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+                                │
+                                │ Approve
+                                ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Official 3    │────▶│   Approval      │────▶│   Official 4    │
+│   (Wallet 3)    │     │   Collection    │     │   (Wallet 4)    │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
 ```
 
-This contract implements a robust escrow system suitable for treasury management, grant distributions, or any scenario requiring multi-party governance over fund release.
+This escrow system provides robust multi-signature governance suitable for:
+- Treasury management
+- Grant disbursements
+- Corporate approvals
+- DAO fund allocation
+- Any scenario requiring controlled fund release with oversight

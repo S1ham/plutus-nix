@@ -21,6 +21,139 @@ This comprehensive tutorial covers both the on-chain validator (`PublicFunds.hs`
 
 ---
 
+## 🏗️ System Architecture
+
+### Complete System Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph "Cardano Blockchain"
+        SC[Smart Contract<br/>PublicFunds.hs]
+        UTXO1[UTxO 1: Locked Funds<br/>Datum: Approvals = []]
+        UTXO2[UTxO 2: Updated State<br/>Datum: Approvals = [O1]]
+        UTXO3[UTxO 3: Final State<br/>Datum: Approvals = [O1, O2]]
+        
+        SC --> UTXO1
+        UTXO1 -- Approve --> UTXO2
+        UTXO2 -- Approve --> UTXO3
+        UTXO3 -- Release --> EMPTY[Funds Released]
+    end
+    
+    subgraph "Actors & Wallets"
+        D[Depositor<br/>Wallet 1]
+        B[Beneficiary<br/>Wallet 2]
+        O1[Official 1<br/>Wallet 3]
+        O2[Official 2<br/>Wallet 4]
+    end
+    
+    subgraph "Off-Chain Interface"
+        EP1[lock Endpoint]
+        EP2[approve Endpoint]
+        EP3[release Endpoint]
+        EP4[refund Endpoint]
+        
+        EP1 --> SC
+        EP2 --> SC
+        EP3 --> SC
+        EP4 --> SC
+    end
+    
+    D --> EP1
+    O1 --> EP2
+    O2 --> EP2
+    B --> EP3
+    D --> EP4
+    
+    style SC fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style UTXO1 fill:#fff8e1,stroke:#ff6f00
+    style UTXO2 fill:#fff8e1,stroke:#ff6f00
+    style UTXO3 fill:#fff8e1,stroke:#ff6f00
+    style D fill:#f3e5f5,stroke:#4a148c
+    style B fill:#e8f5e8,stroke:#1b5e20
+    style O1 fill:#fff3e0,stroke:#e65100
+    style O2 fill:#fff3e0,stroke:#e65100
+```
+
+### Data Flow Architecture
+
+```mermaid
+flowchart TD
+    subgraph "Input Layer"
+        A[Deposit Request<br/>from Depositor]
+        B[Approval Request<br/>from Official]
+        C[Release Request<br/>from Beneficiary]
+        D[Refund Request<br/>from Depositor]
+    end
+    
+    subgraph "Validation Layer"
+        V1[Signature Validation]
+        V2[Time Validation]
+        V3[Approval Counting]
+        V4[Role Authorization]
+    end
+    
+    subgraph "Business Logic"
+        L1[Check Deadline]
+        L2[Count Approvals]
+        L3[Verify Signatures]
+        L4[Update State]
+    end
+    
+    subgraph "State Management"
+        S1[Initial State<br/>Datum: approvals = []]
+        S2[Intermediate State<br/>Datum: approvals = [O1]]
+        S3[Final State<br/>Datum: approvals = [O1, O2]]
+    end
+    
+    subgraph "Output Actions"
+        O1[Funds Released to Beneficiary]
+        O2[Funds Refunded to Depositor]
+        O3[State Updated on Blockchain]
+        O4[Transaction Recorded]
+    end
+    
+    A --> V1
+    A --> V2
+    A --> L4 --> S1
+    
+    B --> V1
+    B --> V3
+    B --> V4
+    B --> L2 --> L4 --> S2
+    
+    C --> V1
+    C --> V2
+    C --> V3
+    C --> L1
+    C --> L2
+    C --> L3 --> O1
+    
+    D --> V1
+    D --> V2
+    D --> V3
+    D --> L1
+    D --> L2 --> O2
+    
+    S1 --> B
+    S2 --> B
+    S2 --> C
+    
+    O1 --> O4
+    O2 --> O4
+    O3 --> O4
+    
+    style A fill:#e3f2fd
+    style B fill:#f3e5f5
+    style C fill:#e8f5e8
+    style D fill:#fff3e0
+    style V1 fill:#ffebee
+    style V2 fill:#e8eaf6
+    style V3 fill:#f1f8e9
+    style V4 fill:#fffde7
+```
+
+---
+
 ## 1. 📦 Imports Overview
 
 ### On-Chain Imports (`PublicFunds.hs`)
@@ -56,6 +189,22 @@ This comprehensive tutorial covers both the on-chain validator (`PublicFunds.hs`
 
 #### `EscrowDatum`
 The contract state stored on-chain:
+
+```mermaid
+classDiagram
+    class EscrowDatum {
+        +PubKeyHash edDepositor
+        +PubKeyHash edBeneficiary
+        +[PubKeyHash] edOfficials
+        +[PubKeyHash] edApprovals
+        +Integer edRequired
+        +POSIXTime edDeadline
+    }
+    
+    EscrowDatum : +validate() bool
+    EscrowDatum : +addApproval(PubKeyHash) EscrowDatum
+    EscrowDatum : +hasSufficientApprovals() bool
+```
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -211,6 +360,49 @@ Creates initial datum with empty approvals list.
 
 ## 7. 🔄 Contract Endpoints
 
+### Workflow Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant D as Depositor<br/>(Wallet 1)
+    participant O1 as Official 1<br/>(Wallet 3)
+    participant O2 as Official 2<br/>(Wallet 4)
+    participant B as Beneficiary<br/>(Wallet 2)
+    participant SC as Smart Contract
+    participant BC as Blockchain
+    
+    Note over D,B: Phase 1: Fund Locking
+    D->>SC: lock() with 10 ADA
+    Note right of D: Parameters:<br/>- Beneficiary: Wallet 2<br/>- Officials: [W3, W4]<br/>- Required: 2<br/>- Deadline: 20,000
+    SC->>BC: Create UTxO with initial datum<br/>(approvals = [])
+    BC-->>SC: UTxO created
+    
+    Note over D,B: Phase 2: Approval Process
+    O1->>SC: approve()
+    Note right of O1: Must be before deadline
+    SC->>BC: Update datum<br/>(approvals = [O1])
+    BC-->>SC: State updated
+    
+    O2->>SC: approve()
+    Note right of O2: Must be before deadline<br/>Must not have approved before
+    SC->>BC: Update datum<br/>(approvals = [O1, O2])
+    BC-->>SC: State updated
+    
+    Note over D,B: Phase 3: Fund Release
+    B->>SC: release()
+    Note right of B: Must be before deadline<br/>Must have ≥2 approvals<br/>Must be beneficiary
+    SC->>BC: Validate all conditions
+    BC-->>B: Transfer 10 ADA
+    
+    Note over D,B: Alternative: Refund Scenario
+    alt Insufficient approvals by deadline
+        D->>SC: refund()
+        Note right of D: Must be after deadline<br/>Must have <2 approvals<br/>Must be depositor
+        SC->>BC: Validate refund conditions
+        BC-->>D: Return 10 ADA
+    end
+```
+
 ### `lock` Endpoint
 
 ```haskell
@@ -277,22 +469,74 @@ trace = do
     void $ Emulator.waitNSlots 1
 ```
 
-### Execution Flow
-```
-Wallet 1 (Depositor)
-    ↓ Locks 10 ADA
-Escrow Contract (0 approvals)
-    ↓ Wallet 3 approves
-Escrow Contract (1 approval)
-    ↓ Wallet 4 approves
-Escrow Contract (2 approvals - SUFFICIENT)
-    ↓ Wallet 2 (Beneficiary) releases
-Wallet 2 receives 10 ADA
+### State Transition Diagram
+
+```mermaid
+stateDiagram-v2
+    [*] --> Locked
+    Locked --> Approved1 : Official 1 approves
+    Approved1 --> Approved2 : Official 2 approves
+    Approved2 --> Released : Beneficiary releases
+    
+    Locked --> Refunded : Deadline passes<br/>(approvals < required)
+    Approved1 --> Refunded : Deadline passes<br/>(approvals < required)
+    
+    state Locked {
+        [*] --> WaitingForApprovals
+        WaitingForApprovals --> HasSomeApprovals : At least 1 approval
+    }
+    
+    state Approved2 {
+        ReadyForRelease : 2 approvals ≥ required
+    }
+    
+    Released --> [*]
+    Refunded --> [*]
 ```
 
 ---
 
 ## 9. 🚀 Deployment Workflow
+
+### Deployment Architecture
+
+```mermaid
+flowchart LR
+    subgraph "Development"
+        D1[Write Haskell Code]
+        D2[Compile with GHC]
+        D3[Test with Emulator]
+    end
+    
+    subgraph "Build Process"
+        B1[Compile Validator<br/>to Plutus Core]
+        B2[Serialize to<br/>.plutus file]
+        B3[Generate Script Address]
+    end
+    
+    subgraph "Deployment"
+        DP1[Load to PAB<br/>(Plutus App Backend)]
+        DP2[Initialize Contract]
+        DP3[Fund Contract Address]
+        DP4[Distribute Credentials]
+    end
+    
+    subgraph "Production"
+        P1[Cardano Testnet]
+        P2[Script Execution]
+        P3[Fund Management]
+    end
+    
+    D1 --> D2 --> D3
+    D3 --> B1 --> B2 --> B3
+    B3 --> DP1 --> DP2 --> DP3 --> DP4
+    DP4 --> P1 --> P2 --> P3
+    
+    style D1 fill:#e1f5fe
+    style B1 fill:#fff8e1
+    style DP1 fill:#f3e5f5
+    style P1 fill:#e8f5e8
+```
 
 ### Step 1: Compile Validator
 ```bash
@@ -320,6 +564,58 @@ saveVal = writeValidatorToFile "escrow.plutus" validator
 ---
 
 ## 10. 🧪 Testing Strategy
+
+### Test Architecture
+
+```mermaid
+graph TB
+    subgraph "Test Categories"
+        TC1[Unit Tests<br/>Individual Functions]
+        TC2[Integration Tests<br/>End-to-End Workflows]
+        TC3[Edge Cases<br/>Boundary Conditions]
+        TC4[Security Tests<br/>Unauthorized Access]
+    end
+    
+    subgraph "Success Scenarios"
+        SS1[Full Happy Path]
+        SS2[Exact Required Approvals]
+        SS3[More than Required]
+    end
+    
+    subgraph "Failure Scenarios"
+        FS1[Insufficient Approvals]
+        FS2[Double Approval]
+        FS3[Wrong Signer]
+        FS4[Wrong Timing]
+    end
+    
+    subgraph "Test Tools"
+        TT1[Plutus Emulator]
+        TT2[HUnit Test Framework]
+        TT3[QuickCheck Property Tests]
+    end
+    
+    TC1 --> TT1
+    TC2 --> TT1
+    TC3 --> TT2
+    TC4 --> TT3
+    
+    SS1 --> TC2
+    SS2 --> TC2
+    SS3 --> TC2
+    
+    FS1 --> TC3
+    FS2 --> TC4
+    FS3 --> TC4
+    FS4 --> TC3
+    
+    style TC1 fill:#e1f5fe
+    style TC2 fill:#fff8e1
+    style TC3 fill:#f3e5f5
+    style TC4 fill:#ffebee
+    style SS1 fill:#e8f5e8
+    style FS1 fill:#ffebee
+```
 
 ### Unit Tests
 - **Individual Actions:** Test each redeemer in isolation
@@ -382,25 +678,52 @@ saveVal = writeValidatorToFile "escrow.plutus" validator
 
 ---
 
-## 🔄 System Architecture Diagram
+## 🎯 Project Requirements Alignment
 
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Depositor     │────▶│   Escrow        │────▶│   Beneficiary   │
-│   (Wallet 1)    │Lock │   Contract      │Release│   (Wallet 2)   │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-                                │
-                                │ Approve
-                                ▼
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Official 3    │────▶│   Approval      │────▶│   Official 4    │
-│   (Wallet 3)    │     │   Collection    │     │   (Wallet 4)    │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
+### Anti-Corruption Features Implemented
+
+```mermaid
+graph LR
+    subgraph "Anti-Corruption Mechanisms"
+        M1[Multi-Signature<br/>Requires Consensus]
+        M2[Time-Locked<br/>Prevents Stalling]
+        M3[Transparent<br/>All Actions On-Chain]
+        M4[Automated<br/>No Human Discretion]
+        M5[Immutable<br/>Cannot be Altered]
+    end
+    
+    subgraph "Traditional Problems Solved"
+        P1[Single Point of Failure]
+        P2[Opaque Decision Making]
+        P3[Manual Processes]
+        P4[Lack of Audit Trail]
+        P5[Potential for Manipulation]
+    end
+    
+    M1 --> P1
+    M2 --> P1
+    M3 --> P2
+    M4 --> P3
+    M5 --> P4
+    M3 --> P5
+    
+    style M1 fill:#e8f5e8
+    style M2 fill:#e8f5e8
+    style M3 fill:#e8f5e8
+    style M4 fill:#e8f5e8
+    style M5 fill:#e8f5e8
+    style P1 fill:#ffebee
+    style P2 fill:#ffebee
+    style P3 fill:#ffebee
+    style P4 fill:#ffebee
+    style P5 fill:#ffebee
 ```
 
 This escrow system provides robust multi-signature governance suitable for:
-- Treasury management
-- Grant disbursements
-- Corporate approvals
-- DAO fund allocation
-- Any scenario requiring controlled fund release with oversight
+- **Government Fund Management:** Preventing unauthorized access to public funds
+- **Grant Disbursements:** Ensuring proper oversight before release
+- **Corporate Approvals:** Requiring multiple signatures for large transactions
+- **DAO Fund Allocation:** Transparent, community-governed fund distribution
+- **Anti-Corruption Systems:** Creating accountable, auditable fund release mechanisms
+
+The system successfully implements all required features for the CP108 Final Project, providing a complete anti-corruption solution for public fund management through blockchain automation.

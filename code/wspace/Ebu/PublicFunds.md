@@ -309,7 +309,8 @@ trace = do
 
 ### Deployment Architecture
 
-<img width="1777" height="2969" alt="deepseek_mermaid_20251222_eb2c0d (1)" src="https://github.com/user-attachments/assets/6b196dd1-3262-426e-bbdb-ac456ea4075b" />
+
+<img width="10077" height="541" alt="deepseek_mermaid_20251222_fb42ff" src="https://github.com/user-attachments/assets/db7fd65e-b8af-4b83-90b1-772376cb15b3" />
 
 
 ### Step 1: Compile Validator

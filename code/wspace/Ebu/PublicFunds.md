@@ -26,8 +26,8 @@ This comprehensive tutorial covers both the on-chain validator (`PublicFunds.hs`
 
 ### Complete System Architecture Diagram
 
+<img width="3485" height="3496" alt="deepseek_mermaid_20251222_6c6e6d" src="https://github.com/user-attachments/assets/2fbb2c21-bf55-4e11-9f03-e618b52c6b24" />
 
-<img width="9464" height="3428" alt="deepseek_mermaid_20251222_38a973" src="https://github.com/user-attachments/assets/0c931eb3-f5bd-471f-b531-0e780455f559" />
 
 ### Data Flow Architecture
 <img width="9464" height="3428" alt="deepseek_mermaid_20251222_38a973 (1)" src="https://github.com/user-attachments/assets/42cb441b-20d1-4d3b-a8ba-8abb551345b3" />

@@ -1,6 +1,7 @@
 # 🧾 Comprehensive Tutorial: Public Funds Escrow Smart Contract
 
-This comprehensive tutorial covers both the on-chain validator (`PublicFunds.hs`) and off-chain code (`Main.hs`) for a multi-signature escrow smart contract. This system enables secure fund management requiring multiple approvals before release.
+This comprehensive tutorial covers both the on-chain validator (`PublicFunds.hs`) and off-chain code (`Main.hs`) for a multi-signature escrow smart contract. This system enables secure fund management requiring multiple approvals before release.<img width="9464" height="3428" alt="deepseek_mermaid_20251222_38a973" src="https://github.com/user-attachments/assets/cc58ef1a-9bea-405b-bc13-11ffc7308645" />
+
 
 ---
 

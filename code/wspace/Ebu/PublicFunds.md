@@ -342,7 +342,8 @@ saveVal = writeValidatorToFile "escrow.plutus" validator
 
 ### Test Architecture
 
-<img width="10077" height="541" alt="deepseek_mermaid_20251222_afc617" src="https://github.com/user-attachments/assets/0cff738f-5ac5-445c-976e-a6b9ea83b50d" />
+<img width="5395" height="1491" alt="deepseek_mermaid_20251222_56c7dd" src="https://github.com/user-attachments/assets/35891619-7947-4d9d-b1d6-a59a07934fa0" />
+
 
 
 ### Unit Tests
@@ -411,7 +412,8 @@ saveVal = writeValidatorToFile "escrow.plutus" validator
 ### Anti-Corruption Features Implemented
 
 
-<img width="5395" height="1491" alt="deepseek_mermaid_20251222_59e9e6" src="https://github.com/user-attachments/assets/0b7ae138-9234-4a2b-af60-3061a2b7b3fc" />
+<img width="2061" height="2455" alt="deepseek_mermaid_20251222_98a198" src="https://github.com/user-attachments/assets/ac483a64-3ebc-4a81-b45e-3efd291c3143" />
+
 
 This escrow system provides robust multi-signature governance suitable for:
 - **Government Fund Management:** Preventing unauthorized access to public funds
